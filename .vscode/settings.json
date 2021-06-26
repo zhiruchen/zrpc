@@ -1,0 +1,21 @@
+{
+    "editor.fontSize": 18,
+    "extensions.ignoreRecommendations": false,
+    "java.errors.incompleteClasspath.severity": "ignore",
+    "editor.fontLigatures": true,
+    "atomKeymap.promptV3Features": true,
+    "editor.multiCursorModifier": "alt",
+    "editor.formatOnPaste": true,
+    "rust.mode": "legacy",
+    "workbench.colorTheme": "Sublime MavensMate Monokai",
+    "workbench.iconTheme": "eq-material-theme-icons",
+    "materialTheme.fixIconsRunning": false,
+    "[python]": {},
+    "workbench.fontAliasing": "auto",
+    "go.formatTool": "goimports",
+    "go.useLanguageServer": true,
+    "go.toolsManagement.autoUpdate": true,
+    "go.toolsEnvVars": {
+        "GO111MODULE": "on"
+    }
+}
