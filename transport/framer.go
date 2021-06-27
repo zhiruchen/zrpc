@@ -12,3 +12,7 @@ type framer struct {
 	writer *bufio.Writer
 	fr     *http2.Framer
 }
+
+func (f *framer) readFrame() (http2.Frame, error) {
+	return f.fr.ReadFrame()
+}

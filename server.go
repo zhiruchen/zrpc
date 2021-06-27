@@ -68,7 +68,6 @@ func (s *Server) register(sd *grpc.ServiceDesc, ss interface{}) {
 		server:    ss,
 		Endpoints: make(map[string]*grpc.MethodDesc),
 	}
-
 	for _, method := range sd.Methods {
 		md := method
 		service.Endpoints[method.MethodName] = &md
@@ -128,13 +127,13 @@ func (s *Server) processStream(st transport.ServerTransport, stream *transport.S
 	}
 
 	service := mp[:p]
-	method := mp[p+1:]
 	svc, ok := s.svc[service]
 	if !ok {
 		fmt.Printf("unknow service: %s\n", service)
 		return
 	}
 
+	method := mp[p+1:]
 	if md, ok := svc.Endpoints[method]; ok {
 		s.processUnaryRPC(st, stream, svc, md)
 		return
