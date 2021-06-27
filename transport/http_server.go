@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"io"
+	"math"
 	"net"
 	"sync"
 
@@ -11,6 +12,12 @@ import (
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/hpack"
 	"google.golang.org/grpc/codes"
+)
+
+const (
+	defaultWindowSize     = 65535
+	initialWindowSize     = defaultWindowSize      // for an RPC
+	initialConnWindowSize = defaultWindowSize * 16 // for a connection
 )
 
 // http2 server will implement the transport interface
@@ -30,7 +37,40 @@ type http2Server struct {
 }
 
 func newHTTP2Server(conn net.Conn, maxStreams uint32) (ServerTransport, error) {
-	return &http2Server{}, nil
+	framer := newFramer(conn)
+
+	settings := []http2.Setting{}
+	if maxStreams > 0 {
+		settings = append(settings, http2.Setting{ID: http2.SettingMaxConcurrentStreams, Val: maxStreams})
+	}
+
+	if maxStreams == 0 {
+		maxStreams = math.MaxUint32
+	}
+	settings = append(settings, http2.Setting{ID: http2.SettingInitialWindowSize, Val: initialWindowSize})
+
+	if err := framer.writeSettings(true, settings...); err != nil {
+		return nil, ConnectionErrorf(true, err, "http2Server: %v", err)
+	}
+
+	if wp := uint32(initialConnWindowSize - defaultWindowSize); wp > 0 {
+		if err := framer.writeWindowUpdate(true, 0, wp); err != nil {
+			return nil, ConnectionErrorf(true, err, "http2Server: %v", err)
+		}
+	}
+
+	var buf bytes.Buffer
+	h2Server := &http2Server{
+		conn:          conn,
+		framer:        framer,
+		headerBuf:     &buf,
+		headerEncoder: hpack.NewEncoder(&buf),
+		maxStreams:    maxStreams,
+		controlBuf:    newRecvBuffer(),
+		activeStreams: make(map[uint32]*Stream),
+	}
+
+	return h2Server, nil
 }
 
 // ProcessStreams receive and process the stream

@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"fmt"
 	"net"
 	"sync"
 
@@ -23,6 +24,24 @@ type ServerTransport interface {
 	WriteStatus(s *Stream, code codes.Code, desc string) error
 
 	Close() error
+}
+
+type ConnectionErr struct {
+	Desc string
+	temp bool
+	err  error
+}
+
+func ConnectionErrorf(temp bool, err error, format string, args ...interface{}) ConnectionErr {
+	return ConnectionErr{
+		temp: temp,
+		Desc: fmt.Sprintf(format, args...),
+		err:  err,
+	}
+}
+
+func (e ConnectionErr) Error() string {
+	return fmt.Sprintf("connection error: %q", e.Desc)
 }
 
 // NewServerTransport create underlying server transport
