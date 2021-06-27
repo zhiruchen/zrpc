@@ -14,3 +14,7 @@ type Stream struct {
 	buf    *recvBuffer
 	reader io.Reader
 }
+
+func (s *Stream) Method() string {
+	return s.method
+}

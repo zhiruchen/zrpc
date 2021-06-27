@@ -5,10 +5,12 @@ import (
 	"io"
 	"net"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/zhiruchen/zrpc/transport"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/grpclog"
 )
 
@@ -87,11 +89,11 @@ func (s *Server) Serve(lis net.Listener) error {
 func (s *Server) handleConn(conn net.Conn) {
 	st, err := transport.NewServerTransport(conn, s.opts.maxConcurrentStreams)
 	if err != nil {
-		fmt.Errorf("NewServerTransport has error: %v\n", err)
+		fmt.Printf("NewServerTransport has error: %v\n", err)
 		return
 	}
 
-	if s.addConn(conn) {
+	if !s.addConn(conn) {
 		st.Close()
 		return
 	}
@@ -104,17 +106,46 @@ func (s *Server) serveStreams(st transport.ServerTransport) {
 	defer st.Close()
 
 	var done = make(chan struct{})
+	defer close(done)
 	st.ProcessStreams(func(stream *transport.Stream) {
-		done <- struct{}{}
 		go func() {
-			defer close(done)
 			s.processStream(st, stream)
+			done <- struct{}{}
 		}()
 	})
 	<-done
 }
 
 func (s *Server) processStream(st transport.ServerTransport, stream *transport.Stream) {
+	mp := stream.Method()
+	if mp != "" && mp[0] == '/' {
+		mp = mp[1:]
+	}
+	p := strings.LastIndex(mp, "/")
+	if p == -1 {
+		fmt.Printf("unknow method: %s\n", mp)
+		return
+	}
+
+	service := mp[:p]
+	method := mp[p+1:]
+	svc, ok := s.svc[service]
+	if !ok {
+		fmt.Printf("unknow service: %s\n", service)
+		return
+	}
+
+	if md, ok := svc.Endpoints[method]; ok {
+		s.processUnaryRPC(st, stream, svc, md)
+		return
+	}
+
+	if err := st.WriteStatus(stream, codes.Unimplemented, "Unknown method "+method); err != nil {
+		fmt.Printf("zrpc: Server.processStream failed to write status: %v", err)
+	}
+}
+
+func (s *Server) processUnaryRPC(st transport.ServerTransport, stream *transport.Stream, srv *service, md *grpc.MethodDesc) {
 
 }
 

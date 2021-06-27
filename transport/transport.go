@@ -4,6 +4,7 @@ import (
 	"net"
 
 	"github.com/zhiruchen/zrpc/metadata"
+	"google.golang.org/grpc/codes"
 )
 
 type ServerTransport interface {
@@ -16,6 +17,9 @@ type ServerTransport interface {
 	// Write sends the data for the given stream.
 	// Write may not be called on all streams.
 	Write(s *Stream, data []byte) error
+
+	// WriteStatus send status to the client
+	WriteStatus(s *Stream, code codes.Code, desc string) error
 
 	Close() error
 }

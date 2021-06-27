@@ -7,6 +7,7 @@ import (
 
 	"github.com/zhiruchen/zrpc/metadata"
 	"golang.org/x/net/http2/hpack"
+	"google.golang.org/grpc/codes"
 )
 
 // http2 server will implement the transport interface
@@ -34,6 +35,10 @@ func (t *http2Server) WriteHeader(s *Stream, md metadata.MD) error {
 }
 
 func (t *http2Server) Write(s *Stream, data []byte) error {
+	return nil
+}
+
+func (t *http2Server) WriteStatus(s *Stream, code codes.Code, desc string) error {
 	return nil
 }
 
