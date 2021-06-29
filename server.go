@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/zhiruchen/zrpc/log"
 	"github.com/zhiruchen/zrpc/transport"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -22,9 +23,10 @@ type service struct {
 type Option func(s *Server)
 
 type serverOptions struct {
+	codec                Codec
+	unaryInt             grpc.UnaryServerInterceptor
 	maxConcurrentStreams uint32
-	maxRequestMsgSize    int64
-	maxRespMsgSize       int64
+	maxMsgSize           int
 }
 
 type Server struct {
@@ -144,8 +146,65 @@ func (s *Server) processStream(st transport.ServerTransport, stream *transport.S
 	}
 }
 
-func (s *Server) processUnaryRPC(st transport.ServerTransport, stream *transport.Stream, srv *service, md *grpc.MethodDesc) {
+func (s *Server) processUnaryRPC(st transport.ServerTransport, stream *transport.Stream, srv *service, md *grpc.MethodDesc) error {
+	p := &parser{reader: stream}
+	for {
+		_, reqMsg, err := p.recvRPCMsg(uint32(s.opts.maxMsgSize))
+		if err == io.EOF {
+			return err
+		}
 
+		if err == io.ErrUnexpectedEOF {
+			err = transport.StreamError{Code: codes.Internal, Desc: "unexpected EOF"}
+		}
+
+		// TODO: write err status to rpc response
+		if err != nil {
+			return err
+		}
+
+		statusCode := codes.OK
+		statusDesc := ""
+
+		decodeFn := func(v interface{}) error {
+			if len(reqMsg) > int(s.opts.maxMsgSize) {
+				statusCode = codes.Internal
+				statusDesc = fmt.Sprintf("rpc: server received a message of %d bytes exceeding %d limit", len(reqMsg), s.opts.maxMsgSize)
+			}
+
+			if err := s.opts.codec.Unmarshal(reqMsg, v); err != nil {
+				return err
+			}
+
+			return nil
+		}
+
+		reply, handlerErr := md.Handler(srv.server, stream.Context(), decodeFn, s.opts.unaryInt)
+		if handlerErr != nil {
+			if err := st.WriteStatus(stream, statusCode, statusDesc); err != nil {
+				log.Info("rpc: Server.processUnaryRPC write status error: %v", err)
+				return err
+			}
+
+			return nil
+		}
+
+		if err := s.sendResponse(st, stream, reply); err != nil {
+			statusCode, statusDesc = codes.Unknown, err.Error()
+		}
+
+		return st.WriteStatus(stream, statusCode, statusDesc)
+	}
+}
+
+func (s *Server) sendResponse(st transport.ServerTransport, stream *transport.Stream, resp interface{}) error {
+	p, err := encode(s.opts.codec, resp)
+	if err != nil {
+		log.Info("rpc: Server encode response error: %v", err)
+		return err
+	}
+
+	return st.Write(stream, p)
 }
 
 func (s *Server) addConn(c io.Closer) bool {

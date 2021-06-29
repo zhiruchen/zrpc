@@ -59,12 +59,12 @@ func newHTTP2Server(conn net.Conn, maxStreams uint32) (ServerTransport, error) {
 		}
 	}
 
-	var buf bytes.Buffer
+	buf := &bytes.Buffer{}
 	h2Server := &http2Server{
 		conn:          conn,
 		framer:        framer,
-		headerBuf:     &buf,
-		headerEncoder: hpack.NewEncoder(&buf),
+		headerBuf:     buf,
+		headerEncoder: hpack.NewEncoder(buf),
 		maxStreams:    maxStreams,
 		controlBuf:    newRecvBuffer(),
 		activeStreams: make(map[uint32]*Stream),
@@ -123,7 +123,7 @@ func (t *http2Server) ProcessStreams(processor func(s *Stream)) {
 		switch fre := frame.(type) {
 		case *http2.MetaHeadersFrame:
 		case *http2.DataFrame:
-		case http2.RSTStreamFrame:
+		case *http2.RSTStreamFrame:
 		case *http2.SettingsFrame:
 		case *http2.PingFrame:
 		case *http2.WindowUpdateFrame:
