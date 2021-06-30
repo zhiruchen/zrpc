@@ -46,6 +46,10 @@ func NewServer(opts ...Option) *Server {
 		opt(s)
 	}
 
+	if s.opts.codec == nil {
+		s.opts.codec = &protoCodec{}
+	}
+
 	return s
 }
 

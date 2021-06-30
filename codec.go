@@ -20,7 +20,7 @@ func (protoCodec) Marshal(v interface{}) ([]byte, error) {
 	return proto.Marshal(v.(proto.Message))
 }
 
-func (protoCodec) Unmarhal(data []byte, v interface{}) error {
+func (protoCodec) Unmarshal(data []byte, v interface{}) error {
 	return proto.Unmarshal(data, v.(proto.Message))
 }
 
