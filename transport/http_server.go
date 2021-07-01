@@ -2,6 +2,7 @@ package transport
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"math"
 	"net"
@@ -74,7 +75,7 @@ func newHTTP2Server(conn net.Conn, maxStreams uint32) (ServerTransport, error) {
 }
 
 // ProcessStreams receive and process the stream
-func (t *http2Server) ProcessStreams(processor func(s *Stream)) {
+func (t *http2Server) ProcessStreams(handler func(s *Stream)) {
 	preface := make([]byte, len(clientPreface))
 	if _, err := io.ReadFull(t.conn, preface); err != nil {
 		log.Info("[transport.http2Server.HandleStreams] read preface from client: %v", err)
@@ -122,6 +123,11 @@ func (t *http2Server) ProcessStreams(processor func(s *Stream)) {
 
 		switch fre := frame.(type) {
 		case *http2.MetaHeadersFrame:
+			if t.handleHeaders(fre, handler) {
+				t.Close()
+				return
+			}
+
 		case *http2.DataFrame:
 		case *http2.RSTStreamFrame:
 		case *http2.SettingsFrame:
@@ -132,6 +138,40 @@ func (t *http2Server) ProcessStreams(processor func(s *Stream)) {
 			log.Info("[transport.http2Server.HandleStreams] not handled frame type: %v", fre)
 		}
 	}
+}
+
+func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(*Stream)) (close bool) {
+	buf := newRecvBuffer()
+	// Todo: Add inbound flow control
+	s := &Stream{
+		id:  frame.Header().StreamID,
+		st:  t,
+		buf: buf,
+	}
+
+	log.Info("[http2Server.handleHeaders] new stream: %v", s)
+	var state decodeState
+	for _, hf := range frame.Fields {
+		log.Info("[http2Server.handleHeaders] headerFrame: %v", hf)
+		state.processHeaderField(hf)
+	}
+
+	//Todo: wrtie resetStream control signal to control buf
+	if err := state.err; err != nil {
+		return
+	}
+
+	if frame.StreamEnded() {
+		s.state = streamReadDone
+	}
+
+	sctx, scancel := context.WithCancel(context.Background())
+	if state.timeoutSet {
+		sctx, scancel = context.WithTimeout(context.Background(), state.timeout)
+	}
+	s.ctx, s.cancel = sctx, scancel
+
+	return false
 }
 
 func (t *http2Server) handleSettings(f *http2.SettingsFrame) {

@@ -4,18 +4,34 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"google.golang.org/grpc/codes"
 )
 
+type streamState uint8
+
+const (
+	streamActive    streamState = iota
+	streamWriteDone             // end stream sent
+	streamReadDone              // end stream recevied
+	streamDone                  // The stream is finished
+)
+
 type Stream struct {
-	id  uint32
-	st  ServerTransport
-	ctx context.Context
+	id     uint32
+	st     ServerTransport
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	method string
 	buf    *recvBuffer
 	reader io.Reader
+
+	mu         sync.RWMutex
+	state      streamState
+	statusCode codes.Code
+	statusDesc string
 }
 
 type StreamError struct {
