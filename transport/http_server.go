@@ -171,6 +171,11 @@ func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(
 	}
 	s.ctx, s.cancel = sctx, scancel
 
+	s.ctx = newContextWithStream(s.ctx, s)
+	if len(state.mdata) > 0 {
+		s.ctx = metadata.NewContext(s.ctx, state.mdata)
+	}
+
 	return false
 }
 

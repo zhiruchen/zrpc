@@ -54,3 +54,9 @@ func (s *Stream) Context() context.Context {
 func (s *Stream) Read(p []byte) (int, error) {
 	return 0, nil
 }
+
+type streamCtxKey struct{}
+
+func newContextWithStream(ctx context.Context, stream *Stream) context.Context {
+	return context.WithValue(ctx, streamCtxKey{}, stream)
+}

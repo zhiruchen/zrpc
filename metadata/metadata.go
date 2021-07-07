@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"context"
 	"encoding/base64"
 	"strings"
 )
@@ -18,4 +19,10 @@ func DecodeKeyValue(k, v string) (string, string, error) {
 		valueSlice[i] = string(val)
 	}
 	return k, strings.Join(valueSlice, ","), nil
+}
+
+type mdKey struct{}
+
+func NewContext(ctx context.Context, md MD) context.Context {
+	return context.WithValue(ctx, mdKey{}, md)
 }
