@@ -176,6 +176,11 @@ func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(
 		s.ctx = metadata.NewContext(s.ctx, state.mdata)
 	}
 
+	s.reader = &recvBufferReader{
+		ctx:  s.ctx,
+		recv: s.buf,
+	}
+
 	return false
 }
 

@@ -52,6 +52,11 @@ func (s *Stream) Context() context.Context {
 }
 
 func (s *Stream) Read(p []byte) (int, error) {
+	n, err := s.reader.Read(p)
+	if err != nil {
+		return n, err
+	}
+
 	return 0, nil
 }
 
