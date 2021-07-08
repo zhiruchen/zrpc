@@ -21,10 +21,20 @@ const (
 	initialConnWindowSize = defaultWindowSize * 16 // for a connection
 )
 
+type serverState uint
+
+const (
+	reachable serverState = iota
+	unreachable
+	closing
+	stoping
+)
+
 // http2 server will implement the transport interface
 type http2Server struct {
-	conn   net.Conn
-	framer *framer
+	conn        net.Conn
+	maxStreamID uint32
+	framer      *framer
 
 	headerBuf     *bytes.Buffer
 	headerEncoder *hpack.Encoder
@@ -34,6 +44,7 @@ type http2Server struct {
 	controlBuf *recvBuffer
 
 	mu            sync.Mutex
+	state         serverState
 	activeStreams map[uint32]*Stream
 }
 
@@ -181,6 +192,30 @@ func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(
 		recv: s.buf,
 	}
 
+	s.method = state.method
+
+	t.mu.Lock()
+	if t.state != reachable {
+		t.mu.Unlock()
+		return false
+	}
+
+	// reset stream if active streams large than max streams
+	if uint32(len(t.activeStreams)) > t.maxStreams {
+		t.mu.Unlock()
+		return
+	}
+
+	// invalid stream id
+	if s.id%2 != 1 || s.id <= t.maxStreamID {
+		t.mu.Unlock()
+		return true
+	}
+	t.maxStreamID = s.id
+	t.activeStreams[s.id] = s
+	t.mu.Unlock()
+
+	handler(s)
 	return false
 }
 
