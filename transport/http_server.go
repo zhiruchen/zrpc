@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -34,7 +35,10 @@ const (
 type http2Server struct {
 	conn        net.Conn
 	maxStreamID uint32
-	framer      *framer
+
+	// shutdown is closed when http2Server is closed
+	shutdownCh chan struct{}
+	framer     *framer
 
 	headerBuf     *bytes.Buffer
 	headerEncoder *hpack.Encoder
@@ -246,5 +250,22 @@ func (t *http2Server) WriteStatus(s *Stream, code codes.Code, desc string) error
 }
 
 func (t *http2Server) Close() error {
-	return nil
+	t.mu.Lock()
+	if t.state == closing {
+		t.mu.Unlock()
+		return fmt.Errorf("server already closed")
+	}
+
+	t.state = closing
+	streams := t.activeStreams
+	t.activeStreams = nil
+	t.mu.Unlock()
+
+	close(t.shutdownCh)
+	err := t.conn.Close()
+	for _, s := range streams {
+		s.cancel()
+	}
+
+	return err
 }
