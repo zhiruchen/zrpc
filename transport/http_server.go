@@ -148,10 +148,15 @@ func (t *http2Server) ProcessStreams(handler func(s *Stream)) {
 		case *http2.DataFrame:
 			t.handleData(frame)
 		case *http2.RSTStreamFrame:
+			t.handleRSTStream(frame)
 		case *http2.SettingsFrame:
+			t.handleSettings(frame)
 		case *http2.PingFrame:
+			t.handlePing(frame)
 		case *http2.WindowUpdateFrame:
+			t.handleWindowUpdate(frame)
 		case *http2.GoAwayFrame:
+			// handle goAway in client side
 		default:
 			log.Info("[transport.http2Server.HandleStreams] not handled frame type: %v", frame)
 		}
@@ -293,6 +298,15 @@ func (t *http2Server) handleData(f *http2.DataFrame) {
 	}
 }
 
+func (t *http2Server) handleRSTStream(f *http2.RSTStreamFrame) {
+	s, ok := t.getStream(f)
+	if !ok {
+		return
+	}
+
+	t.closeStream(s)
+}
+
 func (t *http2Server) handleSettings(f *http2.SettingsFrame) {
 	if f.IsAck() {
 		return
@@ -307,6 +321,22 @@ func (t *http2Server) handleSettings(f *http2.SettingsFrame) {
 	t.controlBuf.put(&settings{ack: true, ss: ss})
 }
 
+func (t *http2Server) handlePing(f *http2.PingFrame) {
+	pingAck := &ping{ack: true}
+	copy(pingAck.data[:], f.Data[:])
+	t.controlBuf.put(pingAck)
+}
+
+func (t *http2Server) handleWindowUpdate(f *http2.WindowUpdateFrame) {
+	id := f.Header().StreamID
+	// incr := f.Increment
+	if id == 0 {
+		//todo: add incr to transport sendQuotaPool
+		return
+	}
+
+	//todo: add incr to sendQuotaPool
+}
 func (t *http2Server) WriteHeader(s *Stream, md metadata.MD) error {
 	return nil
 }

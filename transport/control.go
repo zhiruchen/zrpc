@@ -22,6 +22,11 @@ type settings struct {
 	ss  []http2.Setting
 }
 
+type ping struct {
+	ack  bool
+	data [8]byte
+}
+
 // inboundFlow handle inbound flow control
 type inboundFlow struct {
 	limit uint32
