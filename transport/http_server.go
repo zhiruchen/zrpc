@@ -46,6 +46,7 @@ type http2Server struct {
 	maxStreams uint32
 	// controlBuf send the control frames to the control handler
 	controlBuf *recvBuffer
+	fc         *inboundFlow
 
 	mu            sync.Mutex
 	state         serverState
@@ -83,6 +84,7 @@ func newHTTP2Server(conn net.Conn, maxStreams uint32) (ServerTransport, error) {
 		headerEncoder: hpack.NewEncoder(buf),
 		maxStreams:    maxStreams,
 		controlBuf:    newRecvBuffer(),
+		fc:            &inboundFlow{limit: initialConnWindowSize},
 		activeStreams: make(map[uint32]*Stream),
 	}
 
@@ -136,23 +138,40 @@ func (t *http2Server) ProcessStreams(handler func(s *Stream)) {
 			return
 		}
 
-		switch fre := frame.(type) {
+		switch frame := frame.(type) {
 		case *http2.MetaHeadersFrame:
-			if t.handleHeaders(fre, handler) {
+			if t.handleHeaders(frame, handler) {
 				t.Close()
 				return
 			}
 
 		case *http2.DataFrame:
+			t.handleData(frame)
 		case *http2.RSTStreamFrame:
 		case *http2.SettingsFrame:
 		case *http2.PingFrame:
 		case *http2.WindowUpdateFrame:
 		case *http2.GoAwayFrame:
 		default:
-			log.Info("[transport.http2Server.HandleStreams] not handled frame type: %v", fre)
+			log.Info("[transport.http2Server.HandleStreams] not handled frame type: %v", frame)
 		}
 	}
+}
+
+func (t *http2Server) getStream(f http2.Frame) (*Stream, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.activeStreams == nil {
+		return nil, false
+	}
+
+	v, ok := t.activeStreams[f.Header().StreamID]
+	if !ok {
+		return nil, false
+	}
+
+	return v, true
 }
 
 func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(*Stream)) (close bool) {
@@ -162,6 +181,7 @@ func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(
 		id:  frame.Header().StreamID,
 		st:  t,
 		buf: buf,
+		fc:  &inboundFlow{limit: initialWindowSize},
 	}
 
 	log.Info("[http2Server.handleHeaders] new stream: %v", s)
@@ -223,6 +243,56 @@ func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(
 	return false
 }
 
+func (t *http2Server) handleData(f *http2.DataFrame) {
+	size := len(f.Data())
+	if err := t.fc.onData(uint32(size)); err != nil {
+		log.Info("[http2Server] onData error: %v", err)
+		t.Close()
+		return
+	}
+
+	s, ok := t.getStream(f)
+	if !ok {
+		if w := t.fc.onRead(uint32(size)); w > 0 {
+			t.controlBuf.put(&windowUpdate{0, w})
+		}
+		return
+	}
+
+	if size > 0 {
+		s.mu.Lock()
+		if s.state == streamDone {
+			s.mu.Unlock()
+			if wp := t.fc.onRead(uint32(size)); wp > 0 {
+				t.controlBuf.put(&windowUpdate{0, wp})
+			}
+			return
+		}
+
+		if err := t.fc.onData(uint32(size)); err != nil {
+			s.mu.Unlock()
+			t.closeStream(s)
+			t.controlBuf.put(&resetStream{s.id, http2.ErrCodeFlowControl})
+			return
+		}
+		s.mu.Unlock()
+
+		data := make([]byte, size)
+		copy(data, f.Data())
+		s.write(&recvMsg{data: data})
+	}
+
+	if f.Header().Flags.Has(http2.FlagDataEndStream) {
+		s.mu.Lock()
+		if s.state != streamDone {
+			s.state = streamReadDone
+		}
+		s.mu.Unlock()
+
+		s.write(&recvMsg{err: io.EOF})
+	}
+}
+
 func (t *http2Server) handleSettings(f *http2.SettingsFrame) {
 	if f.IsAck() {
 		return
@@ -268,4 +338,29 @@ func (t *http2Server) Close() error {
 	}
 
 	return err
+}
+
+func (t *http2Server) closeStream(s *Stream) {
+	t.mu.Lock()
+	delete(t.activeStreams, s.id)
+	if t.state == closing && len(t.activeStreams) == 0 {
+		defer t.Close()
+	}
+	t.mu.Unlock()
+
+	s.cancel()
+	s.mu.Lock()
+	if q := s.fc.resetPendingData(); q > 0 {
+		if wp := t.fc.onRead(q); wp > 0 {
+			t.controlBuf.put(&windowUpdate{0, wp})
+		}
+	}
+
+	if s.state == streamDone {
+		s.mu.Unlock()
+		return
+	}
+
+	s.state = streamDone
+	s.mu.Unlock()
 }

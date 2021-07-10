@@ -27,6 +27,7 @@ type Stream struct {
 	method string
 	buf    *recvBuffer
 	reader io.Reader
+	fc     *inboundFlow
 
 	mu         sync.RWMutex
 	state      streamState
@@ -39,6 +40,10 @@ type StreamError struct {
 	Desc string
 }
 
+func StreamErrorf(code codes.Code, desc string) StreamError {
+	return StreamError{code, desc}
+}
+
 func (e StreamError) Error() string {
 	return fmt.Sprintf("stream error: code=%d desc= %q", e.Code, e.Desc)
 }
@@ -49,6 +54,10 @@ func (s *Stream) Method() string {
 
 func (s *Stream) Context() context.Context {
 	return s.ctx
+}
+
+func (s *Stream) write(m *recvMsg) {
+	s.buf.put(m)
 }
 
 func (s *Stream) Read(p []byte) (int, error) {

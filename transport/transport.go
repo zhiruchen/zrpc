@@ -12,7 +12,7 @@ import (
 )
 
 var (
-	errStreamStop = StreamError(codes.Unavailable, "the stream stop receive new RPC")
+	errStreamStop = StreamErrorf(codes.Unavailable, "the stream stop receive new RPC")
 )
 
 type ServerTransport interface {

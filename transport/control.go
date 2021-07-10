@@ -7,6 +7,16 @@ import (
 	"golang.org/x/net/http2"
 )
 
+type windowUpdate struct {
+	streamID  uint32
+	increment uint32
+}
+
+type resetStream struct {
+	streamID uint32
+	errCode  http2.ErrCode
+}
+
 type settings struct {
 	ack bool
 	ss  []http2.Setting
@@ -21,7 +31,7 @@ type inboundFlow struct {
 	pendingUpdate uint32 // data size app has consumed, but server not send windowupdate for them
 }
 
-// onData update pendingData, when received data frame from client
+// onData update pendingData, when received data frame from peer
 func (f *inboundFlow) onData(n uint32) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
