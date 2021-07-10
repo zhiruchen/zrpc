@@ -24,10 +24,11 @@ type Stream struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	method string
-	buf    *recvBuffer
-	reader io.Reader
-	fc     *inboundFlow
+	method              string
+	buf                 *recvBuffer
+	reader              io.Reader
+	fc                  *inboundFlow
+	windowUpdateHandler func(uint32)
 
 	mu         sync.RWMutex
 	state      streamState

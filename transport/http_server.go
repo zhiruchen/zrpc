@@ -181,7 +181,6 @@ func (t *http2Server) getStream(f http2.Frame) (*Stream, bool) {
 
 func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(*Stream)) (close bool) {
 	buf := newRecvBuffer()
-	// Todo: Add inbound flow control
 	s := &Stream{
 		id:  frame.Header().StreamID,
 		st:  t,
@@ -198,6 +197,9 @@ func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(
 
 	//Todo: wrtie resetStream control signal to control buf
 	if err := state.err; err != nil {
+		if se, ok := err.(StreamError); ok {
+			t.controlBuf.put(&resetStream{s.id, http2.ErrCode(se.Code)})
+		}
 		return
 	}
 
@@ -232,20 +234,42 @@ func (t *http2Server) handleHeaders(frame *http2.MetaHeadersFrame, handler func(
 	// reset stream if active streams large than max streams
 	if uint32(len(t.activeStreams)) > t.maxStreams {
 		t.mu.Unlock()
+		t.controlBuf.put(&resetStream{s.id, http2.ErrCodeRefusedStream})
 		return
 	}
 
 	// invalid stream id
 	if s.id%2 != 1 || s.id <= t.maxStreamID {
 		t.mu.Unlock()
+		log.Info("[tranport] http2Server.ProcessStreams received invalid stream id: %d", s.id)
 		return true
 	}
 	t.maxStreamID = s.id
 	t.activeStreams[s.id] = s
 	t.mu.Unlock()
 
+	s.windowUpdateHandler = func(n uint32) {
+		t.updateWindow(s, n)
+	}
+
 	handler(s)
 	return false
+}
+
+func (t *http2Server) updateWindow(s *Stream, n uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state == streamDone {
+		return
+	}
+
+	if wp := t.fc.onRead(n); wp > 0 {
+		t.controlBuf.put(&windowUpdate{0, wp})
+	}
+
+	if wp := s.fc.onRead(n); wp > 0 {
+		t.controlBuf.put(&windowUpdate{s.id, wp})
+	}
 }
 
 func (t *http2Server) handleData(f *http2.DataFrame) {
