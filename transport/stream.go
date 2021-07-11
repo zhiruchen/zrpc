@@ -31,6 +31,7 @@ type Stream struct {
 	windowUpdateHandler func(uint32)
 
 	mu         sync.RWMutex
+	headerOk   bool // true, if the first header frame is about to send
 	state      streamState
 	statusCode codes.Code
 	statusDesc string
@@ -47,6 +48,17 @@ func StreamErrorf(code codes.Code, desc string) StreamError {
 
 func (e StreamError) Error() string {
 	return fmt.Sprintf("stream error: code=%d desc= %q", e.Code, e.Desc)
+}
+
+func ContextErr(err error) StreamError {
+	switch err {
+	case context.DeadlineExceeded:
+		return StreamErrorf(codes.DeadlineExceeded, err.Error())
+	case context.Canceled:
+		return StreamErrorf(codes.Canceled, err.Error())
+	}
+
+	panic("Unexpect error from context: " + err.Error())
 }
 
 func (s *Stream) Method() string {

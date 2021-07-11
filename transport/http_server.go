@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	http2MaxFrameLen      = 16384 // 16KB per frame
 	defaultWindowSize     = 65535
 	initialWindowSize     = defaultWindowSize      // for an RPC
 	initialConnWindowSize = defaultWindowSize * 16 // for a connection
@@ -35,6 +36,10 @@ const (
 type http2Server struct {
 	conn        net.Conn
 	maxStreamID uint32
+
+	// sync the write access to the transport
+	// get the access by receive a value from the chan, realse the access by sending struct{}{}
+	writeableCh chan struct{}
 
 	// shutdown is closed when http2Server is closed
 	shutdownCh chan struct{}
@@ -366,7 +371,62 @@ func (t *http2Server) WriteHeader(s *Stream, md metadata.MD) error {
 }
 
 func (t *http2Server) Write(s *Stream, data []byte) error {
-	return nil
+	var writeHeaderFrame bool
+
+	s.mu.Lock()
+	if s.state == streamDone {
+		s.mu.Unlock()
+		return StreamErrorf(codes.Unknown, "rpc stream has done")
+	}
+
+	if !s.headerOk {
+		writeHeaderFrame = true
+		s.headerOk = true
+	}
+	s.mu.Unlock()
+
+	if writeHeaderFrame {
+		// todo: wait until can write to http2 server
+
+		t.headerBuf.Reset()
+		t.headerEncoder.WriteField(hpack.HeaderField{Name: ":status", Value: "200"})
+		t.headerEncoder.WriteField(hpack.HeaderField{Name: "content-type", Value: "application/zrpc"})
+
+		p := http2.HeadersFrameParam{
+			StreamID:      s.id,
+			BlockFragment: t.headerBuf.Bytes(),
+			EndHeaders:    true,
+		}
+		if err := t.framer.writeHeaders(false, p); err != nil {
+			t.Close()
+			return ConnectionErrorf(true, err, "transport: %v", err)
+		}
+
+		t.writeableCh <- struct{}{}
+	}
+
+	r := bytes.NewBuffer(data)
+	for {
+		if r.Len() == 0 {
+			return nil
+		}
+
+		p := r.Next(http2MaxFrameLen)
+		<-t.writeableCh
+
+		select {
+		case <-s.ctx.Done():
+			t.writeableCh <- struct{}{}
+			return ContextErr(s.ctx.Err())
+		default:
+		}
+
+		if err := t.framer.writeData(r.Len() == 0, s.id, false, p); err != nil {
+			t.Close()
+			return ConnectionErrorf(true, err, "transport: %v", err)
+		}
+		t.writeableCh <- struct{}{}
+	}
 }
 
 func (t *http2Server) WriteStatus(s *Stream, code codes.Code, desc string) error {
