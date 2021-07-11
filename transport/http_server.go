@@ -21,6 +21,8 @@ const (
 	defaultWindowSize     = 65535
 	initialWindowSize     = defaultWindowSize      // for an RPC
 	initialConnWindowSize = defaultWindowSize * 16 // for a connection
+
+	zrpcContentType = "application/zrpc"
 )
 
 type serverState uint
@@ -367,6 +369,73 @@ func (t *http2Server) handleWindowUpdate(f *http2.WindowUpdateFrame) {
 	//todo: add incr to sendQuotaPool
 }
 func (t *http2Server) WriteHeader(s *Stream, md metadata.MD) error {
+	s.mu.Lock()
+	if s.headerOk || s.state == streamDone {
+		s.mu.Unlock()
+		return errIllegalHeaderWrite
+	}
+
+	s.headerOk = true
+	s.mu.Unlock()
+
+	//todo: wait shutdownCh, writeableCh
+
+	t.headerBuf.Reset()
+	t.headerEncoder.WriteField(hpack.HeaderField{Name: ":status", Value: "200"})
+	t.headerEncoder.WriteField(hpack.HeaderField{Name: "content-type", Value: zrpcContentType})
+
+	for hdr, values := range md {
+		if isReservedHeader(hdr) {
+			continue
+		}
+
+		for _, value := range values {
+			t.headerEncoder.WriteField(hpack.HeaderField{Name: hdr, Value: value})
+		}
+	}
+
+	if err := t.writeHeaders(s, t.headerBuf, false); err != nil {
+		return err
+	}
+	t.writeableCh <- struct{}{}
+	return nil
+}
+
+func (t *http2Server) writeHeaders(s *Stream, b *bytes.Buffer, endStream bool) error {
+	var (
+		err         error
+		firstHeader = true
+		endHeaders  = false
+	)
+
+	for !endHeaders {
+		size := t.headerBuf.Len()
+
+		if size > http2MaxFrameLen {
+			size = http2MaxFrameLen
+		} else {
+			endHeaders = true
+		}
+
+		if firstHeader {
+			p := http2.HeadersFrameParam{
+				StreamID:      s.id,
+				BlockFragment: b.Next(size),
+				EndStream:     endStream,
+				EndHeaders:    endHeaders,
+			}
+			err = t.framer.writeHeaders(endHeaders, p)
+			firstHeader = false
+		} else {
+			err = t.framer.writeContinuation(endHeaders, s.id, endHeaders, b.Next(size))
+		}
+
+		if err != nil {
+			t.Close()
+			return ConnectionErrorf(true, err, "[transport]: %v", err)
+		}
+	}
+
 	return nil
 }
 

@@ -47,6 +47,18 @@ func (f *framer) writeHeaders(flush bool, p http2.HeadersFrameParam) error {
 	return f.writer.Flush()
 }
 
+func (f *framer) writeContinuation(flush bool, streamID uint32, endHeaders bool, p []byte) error {
+	if err := f.fr.WriteContinuation(streamID, endHeaders, p); err != nil {
+		return err
+	}
+
+	if !flush {
+		return nil
+	}
+
+	return f.writer.Flush()
+}
+
 func (f *framer) writeData(flush bool, streamID uint32, endStream bool, data []byte) error {
 	if err := f.fr.WriteData(streamID, endStream, data); err != nil {
 		return err

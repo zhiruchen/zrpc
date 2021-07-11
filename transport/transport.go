@@ -3,6 +3,7 @@ package transport
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
@@ -12,7 +13,8 @@ import (
 )
 
 var (
-	errStreamStop = StreamErrorf(codes.Unavailable, "the stream stop receive new RPC")
+	errIllegalHeaderWrite = errors.New("[transport] the stream is done or header already been sent")
+	errStreamStop         = StreamErrorf(codes.Unavailable, "the stream stop receive new RPC")
 )
 
 type ServerTransport interface {

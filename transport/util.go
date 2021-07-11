@@ -29,6 +29,15 @@ type decodeState struct {
 	mdata      map[string][]string
 }
 
+func isReservedHeader(hdr string) bool {
+	if hdr != "" && hdr[0] == ':' {
+		return true
+	}
+
+	//todo: add reserved headers
+	return false
+}
+
 func (d *decodeState) processHeaderField(f hpack.HeaderField) {
 	switch f.Name {
 	case "content-type":
