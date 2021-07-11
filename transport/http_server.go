@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"net"
+	"strconv"
 	"sync"
 
 	"github.com/zhiruchen/zrpc/log"
@@ -499,6 +500,38 @@ func (t *http2Server) Write(s *Stream, data []byte) error {
 }
 
 func (t *http2Server) WriteStatus(s *Stream, code codes.Code, desc string) error {
+	var headerSent bool
+
+	s.mu.Lock()
+	if s.state == streamDone {
+		s.mu.Unlock()
+		return nil
+	}
+
+	if s.headerOk {
+		headerSent = true
+	}
+	s.mu.Unlock()
+
+	//todo: wait shutdownCh, writebleCh
+
+	t.headerBuf.Reset()
+	if !headerSent {
+		t.headerEncoder.WriteField(hpack.HeaderField{Name: ":status", Value: "200"})
+		t.headerEncoder.WriteField(hpack.HeaderField{Name: "content-type", Value: zrpcContentType})
+	}
+	t.headerEncoder.WriteField(hpack.HeaderField{Name: "rpc-status", Value: strconv.Itoa(int(code))})
+	t.headerEncoder.WriteField(hpack.HeaderField{Name: "rpc-message", Value: desc})
+
+	//todo: write trailer metadata to headerBuf
+
+	if err := t.writeHeaders(s, t.headerBuf, true); err != nil {
+		t.Close()
+		return err
+	}
+
+	t.closeStream(s)
+	t.writeableCh <- struct{}{}
 	return nil
 }
 
