@@ -92,10 +92,12 @@ func newHTTP2Server(conn net.Conn, maxStreams uint32) (ServerTransport, error) {
 		headerEncoder: hpack.NewEncoder(buf),
 		maxStreams:    maxStreams,
 		controlBuf:    newRecvBuffer(),
+		writeableCh:   make(chan struct{}, 1),
 		fc:            &inboundFlow{limit: initialConnWindowSize},
 		activeStreams: make(map[uint32]*Stream),
 	}
 
+	h2Server.writeableCh <- struct{}{}
 	return h2Server, nil
 }
 
@@ -514,6 +516,7 @@ func (t *http2Server) WriteStatus(s *Stream, code codes.Code, desc string) error
 	s.mu.Unlock()
 
 	//todo: wait shutdownCh, writebleCh
+	<-t.writeableCh
 
 	t.headerBuf.Reset()
 	if !headerSent {
