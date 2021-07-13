@@ -97,6 +97,8 @@ func newHTTP2Server(conn net.Conn, maxStreams uint32) (ServerTransport, error) {
 		activeStreams: make(map[uint32]*Stream),
 	}
 
+	go h2Server.controller()
+
 	h2Server.writeableCh <- struct{}{}
 	return h2Server, nil
 }
@@ -536,6 +538,34 @@ func (t *http2Server) WriteStatus(s *Stream, code codes.Code, desc string) error
 	t.closeStream(s)
 	t.writeableCh <- struct{}{}
 	return nil
+}
+
+func (t *http2Server) controller() {
+	for {
+		select {
+		case v := <-t.controlBuf.get():
+			t.controlBuf.load()
+			select {
+			case <-t.writeableCh:
+				switch s := v.(type) {
+				case *windowUpdate:
+				case *settings:
+				case *resetStream:
+				// todo: add case *goAway:
+				case *ping:
+				//todo add case *flushIO:
+				default:
+					log.Info("[transport.http2Server] controller get not support signal: %v", s)
+				}
+				t.writeableCh <- struct{}{}
+				continue
+			case <-t.shutdownCh:
+				return
+			}
+		case <-t.shutdownCh:
+			return
+		}
+	}
 }
 
 func (t *http2Server) Close() error {
