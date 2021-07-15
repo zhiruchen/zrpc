@@ -83,6 +83,54 @@ func (f *framer) writeSettings(flush bool, settings ...http2.Setting) error {
 	return nil
 }
 
+func (f *framer) writeSettingsAck(flush bool) error {
+	if err := f.fr.WriteSettingsAck(); err != nil {
+		return err
+	}
+
+	if flush {
+		return f.writer.Flush()
+	}
+
+	return nil
+}
+
+func (f *framer) writeRSTStream(flush bool, streamID uint32, code http2.ErrCode) error {
+	if err := f.fr.WriteRSTStream(streamID, code); err != nil {
+		return err
+	}
+
+	if flush {
+		return f.writer.Flush()
+	}
+
+	return nil
+}
+
+func (f *framer) writeGoAway(flush bool, streamID uint32, code http2.ErrCode, debugData []byte) error {
+	if err := f.fr.WriteGoAway(streamID, code, debugData); err != nil {
+		return err
+	}
+
+	if flush {
+		return f.writer.Flush()
+	}
+
+	return nil
+}
+
+func (f *framer) writePing(flush bool, ask bool, data [8]byte) error {
+	if err := f.fr.WritePing(ask, data); err != nil {
+		return err
+	}
+
+	if flush {
+		return f.writer.Flush()
+	}
+
+	return nil
+}
+
 func (f *framer) writeWindowUpdate(flush bool, streamID uint32, incr uint32) error {
 	if err := f.fr.WriteWindowUpdate(streamID, incr); err != nil {
 		return err

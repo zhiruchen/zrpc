@@ -549,11 +549,29 @@ func (t *http2Server) controller() {
 			case <-t.writeableCh:
 				switch s := v.(type) {
 				case *windowUpdate:
+					t.framer.writeWindowUpdate(true, s.streamID, s.increment)
 				case *settings:
+					if s.ack {
+						t.framer.writeSettingsAck(true)
+					} else {
+						t.framer.writeSettings(true, s.ss...)
+					}
 				case *resetStream:
-				// todo: add case *goAway:
+					t.framer.writeRSTStream(true, s.streamID, s.errCode)
+				case *goAway:
+					t.mu.Lock()
+					if t.state == closing {
+						t.mu.Unlock()
+						return
+					}
+					sid := t.maxStreamID
+					t.state = stoping
+					t.mu.Unlock()
+
+					t.framer.writeGoAway(true, sid, http2.ErrCodeNo, nil)
 				case *ping:
-				//todo add case *flushIO:
+					t.framer.writePing(true, s.ack, s.data)
+				case *flushIO:
 				default:
 					log.Info("[transport.http2Server] controller get not support signal: %v", s)
 				}

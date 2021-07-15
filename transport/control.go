@@ -27,6 +27,10 @@ type ping struct {
 	data [8]byte
 }
 
+type goAway struct{}
+
+type flushIO struct{}
+
 // inboundFlow handle inbound flow control
 type inboundFlow struct {
 	limit uint32
