@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 
@@ -14,6 +15,7 @@ import (
 
 var (
 	errIllegalHeaderWrite = errors.New("[transport] the stream is done or header already been sent")
+	errConnClosing        = ConnectionErr{Desc: "transport is closing", temp: true}
 	errStreamStop         = StreamErrorf(codes.Unavailable, "the stream stop receive new RPC")
 )
 
@@ -139,5 +141,25 @@ func (rd *recvBufferReader) Read(p []byte) (n int, err error) {
 
 		rd.last = bytes.NewReader(m.data)
 		return rd.last.Read(p)
+	}
+}
+
+func wait(ctx context.Context, done, goAway, closing, proceed <-chan struct{}) (struct{}, error) {
+	select {
+	case <-ctx.Done():
+		return struct{}{}, ContextErr(ctx.Err())
+	case <-done:
+		select {
+		case <-ctx.Done():
+			return struct{}{}, ContextErr(ctx.Err())
+		default:
+		}
+		return struct{}{}, io.EOF
+	case <-goAway:
+		return struct{}{}, errStreamStop
+	case <-closing:
+		return struct{}{}, errConnClosing
+	case v := <-proceed:
+		return v, nil
 	}
 }

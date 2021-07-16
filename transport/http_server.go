@@ -93,6 +93,7 @@ func newHTTP2Server(conn net.Conn, maxStreams uint32) (ServerTransport, error) {
 		maxStreams:    maxStreams,
 		controlBuf:    newRecvBuffer(),
 		writeableCh:   make(chan struct{}, 1),
+		shutdownCh:    make(chan struct{}),
 		fc:            &inboundFlow{limit: initialConnWindowSize},
 		activeStreams: make(map[uint32]*Stream),
 	}
@@ -383,7 +384,9 @@ func (t *http2Server) WriteHeader(s *Stream, md metadata.MD) error {
 	s.headerOk = true
 	s.mu.Unlock()
 
-	//todo: wait shutdownCh, writeableCh
+	if err := t.waitForWrite(s.ctx); err != nil {
+		return err
+	}
 
 	t.headerBuf.Reset()
 	t.headerEncoder.WriteField(hpack.HeaderField{Name: ":status", Value: "200"})
@@ -460,7 +463,9 @@ func (t *http2Server) Write(s *Stream, data []byte) error {
 	s.mu.Unlock()
 
 	if writeHeaderFrame {
-		// todo: wait until can write to http2 server
+		if err := t.waitForWrite(s.ctx); err != nil {
+			return err
+		}
 
 		t.headerBuf.Reset()
 		t.headerEncoder.WriteField(hpack.HeaderField{Name: ":status", Value: "200"})
@@ -517,8 +522,9 @@ func (t *http2Server) WriteStatus(s *Stream, code codes.Code, desc string) error
 	}
 	s.mu.Unlock()
 
-	//todo: wait shutdownCh, writebleCh
-	<-t.writeableCh
+	if err := t.waitForWrite(s.ctx); err != nil {
+		return err
+	}
 
 	t.headerBuf.Reset()
 	if !headerSent {
@@ -630,4 +636,9 @@ func (t *http2Server) closeStream(s *Stream) {
 
 	s.state = streamDone
 	s.mu.Unlock()
+}
+
+func (t *http2Server) waitForWrite(ctx context.Context) error {
+	_, err := wait(ctx, nil, nil, t.shutdownCh, t.writeableCh)
+	return err
 }
