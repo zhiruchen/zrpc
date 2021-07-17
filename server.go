@@ -110,15 +110,21 @@ func (s *Server) serveStreams(st transport.ServerTransport) {
 	defer s.removeConn(st)
 	defer st.Close()
 
-	var done = make(chan struct{})
-	defer close(done)
+	var wg sync.WaitGroup
 	st.ProcessStreams(func(stream *transport.Stream) {
+		wg.Add(1) // since one conn may serve multiple streams concurrently
 		go func() {
+			defer wg.Done()
+			defer func() {
+				if e := recover(); e != nil {
+					log.Info("[server] processStream panic: %v", e)
+				}
+			}()
+
 			s.processStream(st, stream)
-			done <- struct{}{}
 		}()
 	})
-	<-done
+	wg.Wait()
 }
 
 func (s *Server) processStream(st transport.ServerTransport, stream *transport.Stream) {
